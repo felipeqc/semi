@@ -34,7 +34,7 @@ static void cancel_enforcement_timer(struct enforcement_timer* et)
 {
 	int ret;
 
-	TRACE("cancelling enforcement timer.\n");
+	TRACE("cancelling enforcement timer that would fire at %llu.\n", et->timer._softexpires);
 
 	/* Since interrupts are disabled and et->armed is only
 	 * modified locally, we do not need any locks.
@@ -56,7 +56,7 @@ static void arm_enforcement_timer(struct enforcement_timer* et,
 				  struct task_struct* t)
 {
 	lt_t when_to_fire;
-	TRACE_TASK(t, "arming enforcement timer.\n");
+	TRACE_TASK(t, "arming enforcement timer to fire at %llu.\n", litmus_clock() + budget_remaining(t));
 
 	/* Calling this when there is no budget left for the task
 	 * makes no sense, unless the task is non-preemptive. */

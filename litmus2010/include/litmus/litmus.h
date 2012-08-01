@@ -16,8 +16,8 @@ extern atomic_t release_master_cpu;
 extern atomic_t __log_seq_no;
 
 #define TRACE(fmt, args...) \
-	sched_trace_log_message("%d P%d: " fmt, atomic_add_return(1, &__log_seq_no), \
-				raw_smp_processor_id(), ## args)
+	sched_trace_log_message("%d P%d @%llu: " fmt, atomic_add_return(1, &__log_seq_no), \
+				raw_smp_processor_id(), litmus_clock(), ## args)
 
 #define TRACE_TASK(t, fmt, args...) \
 	TRACE("(%s/%d) " fmt, (t)->comm, (t)->pid, ##args)
