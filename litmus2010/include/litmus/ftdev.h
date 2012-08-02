@@ -6,8 +6,6 @@
 #include <linux/mutex.h>
 #include <linux/cdev.h>
 
-#define MAX_FTDEV_MINORS NR_CPUS
-
 #define FTDEV_ENABLE_CMD 	0
 #define FTDEV_DISABLE_CMD 	1
 
@@ -18,7 +16,8 @@ typedef int  (*ftdev_can_open_t)(struct ftdev* dev, unsigned int buf_no);
 /* return 0 on success, otherwise -$REASON */
 typedef int  (*ftdev_alloc_t)(struct ftdev* dev, unsigned int buf_no);
 typedef void (*ftdev_free_t)(struct ftdev* dev, unsigned int buf_no);
-
+/* Let devices handle writes from userspace. No synchronization provided. */
+typedef ssize_t (*ftdev_write_t)(struct ft_buffer* buf, size_t len, const char __user *from);
 
 struct ftdev_event;
 
@@ -28,22 +27,29 @@ struct ftdev_minor {
 	struct mutex		lock;
 	/* FIXME: filter for authorized events */
 	struct ftdev_event*	events;
+	struct device*		device;
+	struct ftdev*		ftdev;
 };
 
 struct ftdev {
+	dev_t			major;
 	struct cdev		cdev;
-	/* FIXME: don't waste memory, allocate dynamically */
-	struct ftdev_minor	minor[MAX_FTDEV_MINORS];
+	struct class*		class;
+	const char*		name;
+	struct ftdev_minor*	minor;
 	unsigned int		minor_cnt;
 	ftdev_alloc_t		alloc;
 	ftdev_free_t		free;
 	ftdev_can_open_t	can_open;
+	ftdev_write_t		write;
 };
 
 struct ft_buffer* alloc_ft_buffer(unsigned int count, size_t size);
 void free_ft_buffer(struct ft_buffer* buf);
 
-void ftdev_init(struct ftdev* ftdev, struct module* owner);
-int register_ftdev(struct ftdev* ftdev, const char* name, int major);
+int ftdev_init(	struct ftdev* ftdev, struct module* owner,
+		const int minor_cnt, const char* name);
+void ftdev_exit(struct ftdev* ftdev);
+int register_ftdev(struct ftdev* ftdev);
 
 #endif

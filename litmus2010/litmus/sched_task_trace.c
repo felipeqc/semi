@@ -16,9 +16,7 @@
 #include <litmus/ftdev.h>
 
 
-/* set MAJOR to 0 to have it dynamically assigned */
-#define FT_TASK_TRACE_MAJOR	253
-#define NO_EVENTS		4096 /* this is a buffer of 12 4k pages per CPU */
+#define NO_EVENTS		(1 << CONFIG_SCHED_TASK_TRACE_SHIFT)
 
 #define now() litmus_clock()
 
@@ -40,9 +38,17 @@ static int st_dev_can_open(struct ftdev *dev, unsigned int cpu)
 static int __init init_sched_task_trace(void)
 {
 	struct local_buffer* buf;
-	int i, ok = 0;
-	ftdev_init(&st_dev, THIS_MODULE);
-	for (i = 0; i < NR_CPUS; i++) {
+	int i, ok = 0, err;
+	printk("Allocated %u sched_trace_xxx() events per CPU "
+	       "(buffer size: %d bytes)\n",
+	       NO_EVENTS, (int) sizeof(struct local_buffer));
+
+	err = ftdev_init(&st_dev, THIS_MODULE,
+			num_online_cpus(), "sched_trace");
+	if (err)
+		goto err_out;
+
+	for (i = 0; i < st_dev.minor_cnt; i++) {
 		buf = &per_cpu(st_event_buffer, i);
 		ok += init_ft_buffer(&buf->ftbuf, NO_EVENTS,
 				     sizeof(struct st_event_record),
@@ -50,16 +56,32 @@ static int __init init_sched_task_trace(void)
 				     buf->record);
 		st_dev.minor[i].buf = &buf->ftbuf;
 	}
-	if (ok == NR_CPUS) {
-		st_dev.minor_cnt = NR_CPUS;
+	if (ok == st_dev.minor_cnt) {
 		st_dev.can_open = st_dev_can_open;
-		return register_ftdev(&st_dev, "sched_trace", FT_TASK_TRACE_MAJOR);
+		err = register_ftdev(&st_dev);
+		if (err)
+			goto err_dealloc;
 	} else {
-		return -EINVAL;
+		err = -EINVAL;
+		goto err_dealloc;
 	}
+
+	return 0;
+
+err_dealloc:
+	ftdev_exit(&st_dev);
+err_out:
+	printk(KERN_WARNING "Could not register sched_trace module\n");
+	return err;
+}
+
+static void __exit exit_sched_task_trace(void)
+{
+	ftdev_exit(&st_dev);
 }
 
 module_init(init_sched_task_trace);
+module_exit(exit_sched_task_trace);
 
 
 static inline struct st_event_record* get_record(u8 type, struct task_struct* t)
@@ -109,6 +131,7 @@ feather_callback void do_sched_trace_task_param(unsigned long id, unsigned long 
 		rec->data.param.period    = get_rt_period(t);
 		rec->data.param.phase     = get_rt_phase(t);
 		rec->data.param.partition = get_partition(t);
+		rec->data.param.class     = get_class(t);
 		put_record(rec);
 	}
 }
@@ -199,6 +222,20 @@ feather_callback void do_sched_trace_sys_release(unsigned long id,
 	if (rec) {
 		rec->data.sys_release.when    = now();
 		rec->data.sys_release.release = *start;
+		put_record(rec);
+	}
+}
+
+feather_callback void do_sched_trace_action(unsigned long id,
+					    unsigned long _task,
+					    unsigned long action)
+{
+	struct task_struct *t = (struct task_struct*) _task;
+	struct st_event_record* rec = get_record(ST_ACTION, t);
+
+	if (rec) {
+		rec->data.action.when   = now();
+		rec->data.action.action = action;
 		put_record(rec);
 	}
 }

@@ -108,6 +108,26 @@ config SCHED_TASK_TRACE
 	  Say Yes for debugging.
 	  Say No for overhead tracing.
 
+config SCHED_TASK_TRACE_SHIFT
+       int "Buffer size for sched_trace_xxx() events"
+       depends on SCHED_TASK_TRACE
+       range 8 13
+       default 9
+       help
+
+         Select the buffer size of sched_trace_xxx() events as a power of two.
+	 These buffers are statically allocated as per-CPU data. Each event
+	 requires 24 bytes storage plus one additional flag byte. Too large
+	 buffers can cause issues with the per-cpu allocator (and waste
+	 memory). Too small buffers can cause scheduling events to be lost. The
+	 "right" size is workload dependent and depends on the number of tasks,
+	 each task's period, each task's number of suspensions, and how often
+	 the buffer is flushed.
+
+	 Examples: 12 =>   4k events
+		   10 =>   1k events
+		    8 =>  512 events
+
 config SCHED_OVERHEAD_TRACE
 	bool "Record timestamps for overhead measurements"
 	depends on FEATHER_TRACE
@@ -128,6 +148,60 @@ config SCHED_DEBUG_TRACE
 
 	  Say Yes for debugging.
 	  Say No for overhead tracing.
+
+config SCHED_DEBUG_TRACE_SHIFT
+       int "Buffer size for TRACE() buffer"
+       depends on SCHED_DEBUG_TRACE
+       range 14 22
+       default 18
+       help
+
+	Select the amount of memory needed per for the TRACE() buffer, as a
+	power of two. The TRACE() buffer is global and statically allocated. If
+	the buffer is too small, there will be holes in the TRACE() log if the
+	buffer-flushing task is starved.
+
+	The default should be sufficient for most systems. Increase the buffer
+	size if the log contains holes. Reduce the buffer size when running on
+	a memory-constrained system.
+
+	Examples: 14 =>  16KB
+		  18 => 256KB
+		  20 =>   1MB
+
+        This buffer is exported to usespace using a misc device as
+        'litmus/log'. On a system with default udev rules, a corresponding
+        character device node should be created at /dev/litmus/log. The buffer
+        can be flushed using cat, e.g., 'cat /dev/litmus/log > my_log_file.txt'.
+
+config SCHED_DEBUG_TRACE_CALLER
+       bool "Include [function@file:line] tag in TRACE() log"
+       depends on SCHED_DEBUG_TRACE
+       default n
+       help
+         With this option enabled, TRACE() prepends
+
+	      "[<function name>@<filename>:<line number>]"
+
+	 to each message in the debug log. Enable this to aid in figuring out
+         what was called in which order. The downside is that it adds a lot of
+         clutter.
+
+	 If unsure, say No.
+
+config PREEMPT_STATE_TRACE
+       bool "Trace preemption state machine transitions"
+       depends on SCHED_DEBUG_TRACE
+       default n
+       help
+         With this option enabled, each CPU will log when it transitions
+	 states in the preemption state machine. This state machine is
+	 used to determine how to react to IPIs (avoid races with in-flight IPIs).
+
+	 Warning: this creates a lot of information in the debug trace. Only
+	 recommended when you are debugging preemption-related races.
+
+	 If unsure, say No.
 
 endmenu
 

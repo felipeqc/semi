@@ -4,6 +4,7 @@
 #include <linux/cdev.h>
 #include <asm/uaccess.h>
 #include <linux/module.h>
+#include <linux/device.h>
 
 #include <litmus/litmus.h>
 #include <litmus/feather_trace.h>
@@ -113,6 +114,7 @@ static int ftdev_open(struct inode *in, struct file *filp)
 		goto out;
 
 	ftdm = ftdev->minor + buf_idx;
+	ftdm->ftdev = ftdev;
 	filp->private_data = ftdm;
 
 	if (mutex_lock_interruptible(&ftdm->lock)) {
@@ -249,55 +251,51 @@ out:
 	return err;
 }
 
-typedef uint32_t cmd_t;
-
-static ssize_t ftdev_write(struct file *filp, const char __user *from,
-			   size_t len, loff_t *f_pos)
+static long ftdev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
+	long err = -ENOIOCTLCMD;
 	struct ftdev_minor* ftdm = filp->private_data;
-	ssize_t err = -EINVAL;
-	cmd_t cmd;
-	cmd_t id;
-
-	if (len % sizeof(cmd) || len < 2 * sizeof(cmd))
-		goto out;
-
-	if (copy_from_user(&cmd, from, sizeof(cmd))) {
-		err = -EFAULT;
-	        goto out;
-	}
-	len  -= sizeof(cmd);
-	from += sizeof(cmd);
-
-	if (cmd != FTDEV_ENABLE_CMD && cmd != FTDEV_DISABLE_CMD)
-		goto out;
 
 	if (mutex_lock_interruptible(&ftdm->lock)) {
 		err = -ERESTARTSYS;
 		goto out;
 	}
 
-	err = sizeof(cmd);
-	while (len) {
-		if (copy_from_user(&id, from, sizeof(cmd))) {
-			err = -EFAULT;
-			goto out_unlock;
-		}
-		/* FIXME: check id against list of acceptable events */
-		len  -= sizeof(cmd);
-		from += sizeof(cmd);
-		if (cmd == FTDEV_DISABLE_CMD)
-			deactivate(&ftdm->events, id);
-		else if (activate(&ftdm->events, id) != 0) {
-			err = -ENOMEM;
-			goto out_unlock;
-		}
-		err += sizeof(cmd);
-	}
+	/* FIXME: check id against list of acceptable events */
 
-out_unlock:
+	switch (cmd) {
+	case  FTDEV_ENABLE_CMD:
+		if (activate(&ftdm->events, arg))
+			err = -ENOMEM;
+		else
+			err = 0;
+		break;
+
+	case FTDEV_DISABLE_CMD:
+		deactivate(&ftdm->events, arg);
+		err = 0;
+		break;
+
+	default:
+		printk(KERN_DEBUG "ftdev: strange ioctl (%u, %lu)\n", cmd, arg);
+	};
+
 	mutex_unlock(&ftdm->lock);
 out:
+	return err;
+}
+
+static ssize_t ftdev_write(struct file *filp, const char __user *from,
+			   size_t len, loff_t *f_pos)
+{
+	struct ftdev_minor* ftdm = filp->private_data;
+	ssize_t err = -EINVAL;
+	struct ftdev* ftdev = ftdm->ftdev;
+
+	/* dispatch write to buffer-specific code, if available */
+	if (ftdev->write)
+		err = ftdev->write(ftdm->buf, len, from);
+
 	return err;
 }
 
@@ -307,54 +305,135 @@ struct file_operations ftdev_fops = {
 	.release = ftdev_release,
 	.write   = ftdev_write,
 	.read    = ftdev_read,
+	.unlocked_ioctl = ftdev_ioctl,
 };
 
-
-void ftdev_init(struct ftdev* ftdev, struct module* owner)
+int ftdev_init(	struct ftdev* ftdev, struct module* owner,
+		const int minor_cnt, const char* name)
 {
-	int i;
+	int i, err;
+
+	BUG_ON(minor_cnt < 1);
+
 	cdev_init(&ftdev->cdev, &ftdev_fops);
+	ftdev->name = name;
+	ftdev->minor_cnt = minor_cnt;
 	ftdev->cdev.owner = owner;
 	ftdev->cdev.ops = &ftdev_fops;
-	ftdev->minor_cnt  = 0;
-	for (i = 0; i < MAX_FTDEV_MINORS; i++) {
+	ftdev->alloc    = NULL;
+	ftdev->free     = NULL;
+	ftdev->can_open = NULL;
+	ftdev->write	= NULL;
+
+	ftdev->minor = kcalloc(ftdev->minor_cnt, sizeof(*ftdev->minor),
+			GFP_KERNEL);
+	if (!ftdev->minor) {
+		printk(KERN_WARNING "ftdev(%s): Could not allocate memory\n",
+			ftdev->name);
+		err = -ENOMEM;
+		goto err_out;
+	}
+
+	for (i = 0; i < ftdev->minor_cnt; i++) {
 		mutex_init(&ftdev->minor[i].lock);
 		ftdev->minor[i].readers = 0;
 		ftdev->minor[i].buf     = NULL;
 		ftdev->minor[i].events  = NULL;
 	}
-	ftdev->alloc    = NULL;
-	ftdev->free     = NULL;
-	ftdev->can_open = NULL;
+
+	ftdev->class = class_create(owner, ftdev->name);
+	if (IS_ERR(ftdev->class)) {
+		err = PTR_ERR(ftdev->class);
+		printk(KERN_WARNING "ftdev(%s): "
+			"Could not create device class.\n", ftdev->name);
+		goto err_dealloc;
+	}
+
+	return 0;
+
+err_dealloc:
+	kfree(ftdev->minor);
+err_out:
+	return err;
 }
 
-int register_ftdev(struct ftdev* ftdev, const char* name, int major)
+/*
+ * Destroy minor devices up to, but not including, up_to.
+ */
+static void ftdev_device_destroy(struct ftdev* ftdev, unsigned int up_to)
 {
-	dev_t   trace_dev;
-	int error = 0;
+	dev_t minor_cntr;
 
-	if(major) {
-		trace_dev = MKDEV(major, 0);
-		error = register_chrdev_region(trace_dev, ftdev->minor_cnt,
-					       name);
-	} else {
-		error = alloc_chrdev_region(&trace_dev, 0, ftdev->minor_cnt,
-				name);
-		major = MAJOR(trace_dev);
+	if (up_to < 1)
+		up_to = (ftdev->minor_cnt < 1) ? 0 : ftdev->minor_cnt;
+
+	for (minor_cntr = 0; minor_cntr < up_to; ++minor_cntr)
+		device_destroy(ftdev->class, MKDEV(ftdev->major, minor_cntr));
+}
+
+void ftdev_exit(struct ftdev* ftdev)
+{
+	printk("ftdev(%s): Exiting\n", ftdev->name);
+	ftdev_device_destroy(ftdev, -1);
+	cdev_del(&ftdev->cdev);
+	unregister_chrdev_region(MKDEV(ftdev->major, 0), ftdev->minor_cnt);
+	class_destroy(ftdev->class);
+	kfree(ftdev->minor);
+}
+
+int register_ftdev(struct ftdev* ftdev)
+{
+	struct device **device;
+	dev_t trace_dev_tmp, minor_cntr;
+	int err;
+
+	err = alloc_chrdev_region(&trace_dev_tmp, 0, ftdev->minor_cnt,
+			ftdev->name);
+	if (err) {
+		printk(KERN_WARNING "ftdev(%s): "
+		       "Could not allocate char. device region (%d minors)\n",
+		       ftdev->name, ftdev->minor_cnt);
+		goto err_out;
 	}
-	if (error)
+
+	ftdev->major = MAJOR(trace_dev_tmp);
+
+	err = cdev_add(&ftdev->cdev, trace_dev_tmp, ftdev->minor_cnt);
+	if (err) {
+		printk(KERN_WARNING "ftdev(%s): "
+		       "Could not add cdev for major %u with %u minor(s).\n",
+		       ftdev->name, ftdev->major, ftdev->minor_cnt);
+		goto err_unregister;
+	}
+
+	/* create the minor device(s) */
+	for (minor_cntr = 0; minor_cntr < ftdev->minor_cnt; ++minor_cntr)
 	{
-		printk(KERN_WARNING "ftdev(%s): "
-		       "Could not register major/minor number %d/%u\n",
-		       name, major, ftdev->minor_cnt);
-		return error;
+		trace_dev_tmp = MKDEV(ftdev->major, minor_cntr);
+		device = &ftdev->minor[minor_cntr].device;
+
+		*device = device_create(ftdev->class, NULL, trace_dev_tmp, NULL,
+				"litmus/%s%d", ftdev->name, minor_cntr);
+		if (IS_ERR(*device)) {
+			err = PTR_ERR(*device);
+			printk(KERN_WARNING "ftdev(%s): "
+				"Could not create device major/minor number "
+				"%u/%u\n", ftdev->name, ftdev->major,
+				minor_cntr);
+			printk(KERN_WARNING "ftdev(%s): "
+				"will attempt deletion of allocated devices.\n",
+				ftdev->name);
+			goto err_minors;
+		}
 	}
-	error = cdev_add(&ftdev->cdev, trace_dev, ftdev->minor_cnt);
-	if (error) {
-		printk(KERN_WARNING "ftdev(%s): "
-		       "Could not add cdev for major/minor = %d/%u.\n",
-		       name, major, ftdev->minor_cnt);
-		return error;
-	}
-	return error;
+
+	return 0;
+
+err_minors:
+	ftdev_device_destroy(ftdev, minor_cntr);
+	cdev_del(&ftdev->cdev);
+err_unregister:
+	unregister_chrdev_region(MKDEV(ftdev->major, 0), ftdev->minor_cnt);
+err_out:
+	return err;
 }

@@ -6,24 +6,13 @@
 #ifndef _LINUX_LITMUS_H_
 #define _LINUX_LITMUS_H_
 
+#include <litmus/debug_trace.h>
 #include <linux/jiffies.h>
 #include <litmus/sched_trace.h>
 
 #ifdef CONFIG_RELEASE_MASTER
 extern atomic_t release_master_cpu;
 #endif
-
-extern atomic_t __log_seq_no;
-
-#define TRACE(fmt, args...) \
-	sched_trace_log_message("%d P%d @%llu: " fmt, atomic_add_return(1, &__log_seq_no), \
-				raw_smp_processor_id(), litmus_clock(), ## args)
-
-#define TRACE_TASK(t, fmt, args...) \
-	TRACE("(%s/%d) " fmt, (t)->comm, (t)->pid, ##args)
-
-#define TRACE_CUR(fmt, args...) \
-	TRACE_TASK(current, fmt, ## args)
 
 #define TRACE_BUG_ON(cond) \
 	do { if (cond) TRACE("BUG_ON(%s) at %s:%d " \
