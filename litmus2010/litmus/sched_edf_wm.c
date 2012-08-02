@@ -489,10 +489,14 @@ static void wm_task_wake_up(struct task_struct *t)
 
 	/* account sleep time as execution time */
 	if (get_exec_time(t) + sleep_time >= get_exec_cost(t)) {
-		/* new sporadic release */
-		TRACE_TASK(t, "new sporadic release\n");
-		wm_release_at(t, wm_earliest_release(t, now));
-		sched_trace_task_release(t);
+		/* first job is not really tardy in this sense */
+		if (t->rt_param.job_params.job_no != 2 &&
+				get_exec_time(t) == 0) {
+			/* new sporadic release */
+			TRACE_TASK(t, "new sporadic release\n");
+			wm_release_at(t, wm_earliest_release(t, now));
+			sched_trace_task_release(t);
+		}
 	} else if (is_sliced_task(t)) {
 		/* figure out which slice we should be executing on */
 		fast_forward_slices(t, sleep_time);
