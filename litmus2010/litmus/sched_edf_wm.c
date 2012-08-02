@@ -47,6 +47,11 @@ static struct edf_wm_slice* get_last_slice(struct task_struct* t)
 	return tsk_rt(t)->task_params.semi_part.wm.slices + idx;
 }
 
+static lt_t slice_budget(struct task_struct* t)
+{
+	return tsk_rt(t)->semi_part.wm.slice->budget;
+}
+
 static void compute_slice_params(struct task_struct* t)
 {
 	struct rt_param* p = tsk_rt(t);
@@ -60,6 +65,11 @@ static void compute_slice_params(struct task_struct* t)
 		p->semi_part.wm.slice->deadline;
 	p->job_params.release  = p->semi_part.wm.job_release +
 		p->semi_part.wm.slice->offset;
+
+	/* exec_cost must be the cummulative cost of all slices until now
+	 * (including the current one) because it's going to be compared
+	 * with the entire job exec_time in budget_remaining(). */
+	p->task_params.exec_cost += slice_budget(t);
 
 	/* Similarly, we play a trick on the cpu field. */
 	p->task_params.cpu = p->semi_part.wm.slice->cpu;
@@ -76,6 +86,7 @@ static void complete_sliced_job(struct task_struct* t)
 	 * job parameters (see above). */
 	p->job_params.release  = p->semi_part.wm.job_release;
 	p->job_params.deadline = p->semi_part.wm.job_deadline;
+        p->task_params.exec_cost = p->semi_part.wm.job_exec_cost;
 
 	/* Ok, now let generic code do the actual work. */
 	prepare_for_next_period(t);
@@ -92,11 +103,6 @@ static lt_t slice_exec_time(struct task_struct* t)
 	/* Compute how much execution time has been consumed
 	 * since last slice advancement. */
 	return p->job_params.exec_time - p->semi_part.wm.exec_time;
-}
-
-static lt_t slice_budget(struct task_struct* t)
-{
-	return tsk_rt(t)->semi_part.wm.slice->budget;
 }
 
 static int slice_budget_exhausted(struct task_struct* t)
@@ -153,6 +159,9 @@ static void advance_next_slice(struct task_struct* t, int completion_signaled)
 		TRACE_TASK(t, "completed sliced job"
 			   "(signaled:%d)\n", completion_signaled);
 		complete_sliced_job(t);
+
+		/* Cummulative exec_cost starts at 0 (see compute_slice_params(t)) */
+		p->task_params.exec_cost = 0;
 	}
 
 	/* Update job parameters for new slice. */
@@ -413,6 +422,7 @@ static void wm_task_new(struct task_struct * t, int on_rq, int running)
 		tsk_rt(t)->semi_part.wm.exec_time = 0;
 		tsk_rt(t)->semi_part.wm.job_release  = get_release(t);
 		tsk_rt(t)->semi_part.wm.job_deadline = get_deadline(t);
+                tsk_rt(t)->semi_part.wm.job_exec_cost = get_exec_cost(t);
 		tsk_rt(t)->semi_part.wm.slice = tsk_rt(t)->task_params.semi_part.wm.slices;
 		tsk_rt(t)->job_params.exec_time = 0;
 	}

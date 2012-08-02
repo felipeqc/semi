@@ -284,7 +284,7 @@ struct rt_param {
 			/* when did the job suspend? */
 			lt_t suspend_time;
 			/* cached job parameters */
-			lt_t job_release, job_deadline;
+			lt_t job_release, job_deadline, job_exec_cost;
 			/* pointer to the current slice */
 			struct edf_wm_slice* slice;
 		} wm;
