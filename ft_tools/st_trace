@@ -1,0 +1,54 @@
+#!/bin/bash
+
+if [ "$1" == "-s" ]
+then
+  AUTO=1
+  shift
+fi
+
+PIDS=""
+
+# signal that we're done gathering data and clean up
+on_finish()
+{
+    echo "Ending Trace..."
+    kill $PIDS
+    wait $PIDS
+
+    exit 0
+}
+
+# register shutdown signal handler
+trap 'on_finish' SIGUSR1
+
+[ -z "$FTCAT" ] && FTCAT=ftcat
+[ -z "$FTDEV" ] && FTDEV=/dev/litmus/sched_trace
+
+# Setup up sched_trace tracing.
+
+# works for sparc64 and Intel x86 if all CPUs are online
+NUM_CPUS=`egrep -c '^processor|online'   /proc/cpuinfo`
+
+ST_IDS="501 502 503 504 505 506 507 508 509 510"
+
+TAG=$1
+PIDS=""
+for x in `seq 0 $(($NUM_CPUS - 1))`
+do
+    TARGET="st-${TAG}-${x}.bin"
+    echo -n "CPU $x: "
+    $FTCAT "$FTDEV$x" $ST_IDS > "$TARGET"  &
+    PIDS="$PIDS $!"
+    echo $! "> $TARGET [$?]"
+done
+
+if [[ $AUTO != 1 ]]
+then
+    echo "Press Enter to end tracing..."
+    read
+    on_finish
+else
+    # wait for SIGUSR1 to terminate
+    echo "Waiting for SIGUSR1 to end tracing..."
+    while [ 1 ]; do sleep 10; done
+fi
