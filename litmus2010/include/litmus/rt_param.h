@@ -101,6 +101,32 @@ struct edf_wm_params {
 	unsigned int count;
 };
 
+/* The parameters for the HIME semi-partitioned scheduler.
+ * Each task may be split across multiple cpus. Each per-cpu allocation
+ * is called a 'slice'. Each CPU has at most one slice.
+ */
+#define MAX_HIME_SLICES 24
+#define MIN_HIME_SLICE_SIZE 50000 /* .05 millisecond = 50us */
+
+struct hime_slice {
+	/* on which CPU is this slice allocated */
+	unsigned int cpu;
+	/* budget of this slice; must be precisely enforced */
+	lt_t budget;
+};
+
+/* If a job is not sliced across multiple CPUs, then
+ * count is set to zero and none of the slices is used.
+ * This implies that count == 1 is illegal.
+ */
+struct hime_params {
+	/* enumeration of all slices */
+	struct hime_slice slices[MAX_HIME_SLICES];
+
+	/* how many slices are defined? */
+	unsigned int count;
+};
+
 struct rt_task {
 	lt_t 		exec_cost;
 	lt_t 		period;
@@ -123,6 +149,9 @@ struct rt_task {
 
 		/* EDF-WM; defined in sched_edf_wm.c */
 		struct edf_wm_params wm;
+
+		/* HIME; defined in sched_hime.c */
+		struct hime_params hime;
 	} semi_part;
 };
 
@@ -288,6 +317,18 @@ struct rt_param {
 			/* pointer to the current slice */
 			struct edf_wm_slice* slice;
 		} wm;
+
+		/* HIME runtime information */
+		struct {
+			/* at which exec time did the current slice start? */
+			lt_t exec_time;
+			/* when did the job suspend? */
+			lt_t suspend_time;
+			/* cached job parameters */
+			lt_t job_deadline, job_exec_cost;
+			/* pointer to the current slice */
+			struct hime_slice* slice;
+		} hime;
 	} semi_part;
 };
 

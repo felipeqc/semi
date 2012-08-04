@@ -16,6 +16,7 @@ obj-y     = sched_plugin.o litmus.o \
 	    sched_gsn_edf.o \
 	    sched_psn_edf.o \
 	    sched_edf_wm.o \
+	    sched_hime.o \
 	    sched_npsf.o \
 	    sched_edf_fm.o
 
