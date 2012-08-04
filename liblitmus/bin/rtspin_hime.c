@@ -12,8 +12,8 @@
 void usage(char *error) {
 	fprintf(stderr, "Error: %s\n", error);
 	fprintf(stderr,
-		"Usage: rt_spin [-w] task_parameters_file duration\n"
-		"       rt_spin -l\n");
+		"Usage: rtspin_hime [-w] task_parameters_file duration\n"
+		"       rtspin_hime -l\n");
 	exit(1);
 }
 
@@ -181,7 +181,7 @@ int main(int argc, char** argv)
 
 	memset(&rt, 0, sizeof(struct rt_task));
 
-	if (parse_edfwm_ts_file(file, &rt) < 0)
+	if (parse_hime_ts_file(file, &rt) < 0)
 		bail_out("Could not parse file\n");
 
 	if (sporadic_task_ns_semi(&rt) < 0)

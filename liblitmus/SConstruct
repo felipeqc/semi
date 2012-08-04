@@ -196,7 +196,7 @@ mtrt.Append(LINKFLAGS = '-pthread')
 # All the files in src/ are part of the library.
 env.Library('litmus',
             ['src/kernel_iface.c', 'src/litmus.c',
-             'src/syscalls.c', 'src/task.c'])
+             'src/syscalls.c', 'src/task.c', 'src/clocks.c'])
 
 # #####################################################################
 # Targets: simple tools that do not depend on liblitmus
@@ -214,7 +214,9 @@ rt.Program('rtspin_npsf', ['bin/rtspin_npsf.c', 'bin/common.c'])
 rt.Program('npsf_add_server', ['bin/npsf_add_server.c', 'bin/common.c'])
 rt.Program('rt_launch_npsf', ['bin/rt_launch_npsf.c', 'bin/common.c'])
 rt.Program('rtspin_edfwm', ['bin/rtspin_edfwm.c', 'bin/common.c'])
+rt.Program('rtspin_hime', ['bin/rtspin_hime.c', 'bin/common.c'])
 rt.Program('rt_launch_edfwm', ['bin/rt_launch_edfwm.c', 'bin/common.c'])
+rt.Program('rt_launch_hime', ['bin/rt_launch_hime.c', 'bin/common.c'])
 rt.Program('release_ts', 'bin/release_ts.c')
 rtm.Program('measure_syscall', 'bin/null_call.c')
 
