@@ -127,6 +127,34 @@ struct hime_params {
 	unsigned int count;
 };
 
+/* Parameters for the C=D semi-partitioned scheduler.
+ * Each task may be split across multiple cpus. Each per-cpu allocation
+ * is called a 'slice'. Each CPU has at most one slice.
+ */
+#define MAX_CD_SLICES 24
+#define MIN_CD_SLICE_SIZE 50000 /* .05 millisecond = 50us */
+
+struct cd_slice {
+	/* on which CPU is this slice allocated */
+	unsigned int cpu;
+	/* relative deadline from job release (not from slice release!) */
+	lt_t deadline;
+	/* budget of this slice; must be precisely enforced */
+	lt_t budget;
+};
+
+/* If a job is not sliced across multiple CPUs, then
+ * count is set to zero and none of the slices is used.
+ * This implies that count == 1 is illegal.
+ */
+struct cd_params {
+	/* enumeration of all slices */
+	struct cd_slice slices[MAX_CD_SLICES];
+
+	/* how many slices are defined? */
+	unsigned int count;
+};
+
 struct rt_task {
 	lt_t 		exec_cost;
 	lt_t 		period;
@@ -152,6 +180,9 @@ struct rt_task {
 
 		/* HIME; defined in sched_hime.c */
 		struct hime_params hime;
+
+		/* C=D; defined in sched_cd.c */
+		struct cd_params cd;
 	} semi_part;
 };
 
@@ -329,6 +360,18 @@ struct rt_param {
 			/* pointer to the current slice */
 			struct hime_slice* slice;
 		} hime;
+
+		/* C=D runtime information */
+		struct {
+			/* at which exec time did the current slice start? */
+			lt_t exec_time;
+			/* when did the job suspend? */
+			lt_t suspend_time;
+			/* cached job parameters */
+			lt_t job_deadline, job_exec_cost;
+			/* pointer to the current slice */
+			struct cd_slice* slice;
+		} cd;
 	} semi_part;
 };
 
