@@ -146,7 +146,11 @@ static void advance_next_slice(struct task_struct* t, int completion_signaled)
 		   idx, slice_exec_time(t) - slice_budget(t),
 		   completion_signaled);
 
-	if (completion_signaled)
+	/* If the task was reported to be completed, or if the job budget is depleted,
+	   we don't migrate anymore. The second check is necessary because the job may
+	   want to migrate after being completed, because the ocurrence of overheads
+	   affects the measurement of time. That would cause a kernel BUG. */
+	if (completion_signaled || p->job_params.exec_time >= p->semi_part.cd.job_exec_cost)
 		idx = 0;
 	else
 		/* increment and wrap around, if necessary */

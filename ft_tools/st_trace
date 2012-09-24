@@ -21,7 +21,7 @@ on_finish()
 # register shutdown signal handler
 trap 'on_finish' SIGUSR1
 
-[ -z "$FTCAT" ] && FTCAT=ftcat
+[ -z "$FTCAT" ] && FTCAT=/home/felipe/litmus/ft_tools/ftcat
 [ -z "$FTDEV" ] && FTDEV=/dev/litmus/sched_trace
 
 # Setup up sched_trace tracing.

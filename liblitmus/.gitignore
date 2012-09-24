@@ -1,6 +1,8 @@
 # object files
 *.o
 *.a
+*.d
+*.txt
 
 # generated files
 tests/__test_catalog.inc
